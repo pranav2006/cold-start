@@ -60,7 +60,36 @@ def main(folder, out_path, part=None):
                 print(f"  {c['chat_id']:5} truth={truth:5} ours={mine.get('person') or mine.get('organisation')!s:6} name={d.chats[c['chat_id']]['name'][:50]}")
 
 
+def show_loops(d, out, ans):
+    msg = {m["id"]: m for m in d.messages}
+    ours = {l["source_msg"]: l for l in out["open_loops"]}
+    truth_src = {}
+    for a in ans["open_loops"]:
+        for s in a["source_msgs"]:
+            truth_src.setdefault(s, a)
+
+    def line(mid):
+        m = msg[mid]
+        return f"{m['chat_id']:5} {m['sender_name'][:12]:12}: {m['body'][:90]!r}"
+
+    hit = [s for s in ours if s in truth_src]
+    print(f"\nLOOPS: ours {len(ours)}, answer {len(ans['open_loops'])} ({len(truth_src)} distinct sources), matched {len(hit)}")
+    print("  status on matches (truth -> ours):", dict(Counter((truth_src[s]["status"], ours[s]["status"]) for s in hit)))
+    print("\n  MISSED (in answer, not ours):")
+    for s, a in truth_src.items():
+        if s not in ours:
+            print(f"    [{a['status']:4}] {a['title'][:60]!s:60} | {line(s)}")
+    print("\n  EXTRA (ours, not in answer):")
+    for s, l in ours.items():
+        if s not in truth_src:
+            print(f"    [{l['status']:4}] {l['title'][:60]!s:60} | {line(s)}")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) >= 4 and sys.argv[3] == "loops":
+        _, _, _, ans_ = check.load_input(sys.argv[1])
+        show_loops(load(sys.argv[1]), json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), ans_)
+        sys.exit()
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     main(*sys.argv[1:4])
