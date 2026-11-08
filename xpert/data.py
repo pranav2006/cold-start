@@ -23,6 +23,13 @@ def clean(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
+def msg_id(value):
+    """A message id from a model reply. Models sometimes copy the whole line ("M00391 14:57 Priya: ..."),
+    so take the first token only."""
+    parts = str(value or "").replace(",", " ").split()
+    return parts[0] if parts else None
+
+
 def words(text):
     """Lowercase word tokens, keeping letters/digits from any script."""
     return re.findall(r"\w+", clean(text).lower())

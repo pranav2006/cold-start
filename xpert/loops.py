@@ -15,7 +15,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from . import model
-from .data import ME, clean
+from .data import ME, clean, msg_id
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 # About 1,700 tokens of chat per request. Measured on dev: 6,000 found twice the loops of 12,000, because
@@ -158,11 +158,14 @@ def run_job(job, end_label, deadline):
         if not reply:
             continue
         for loop in reply.get("loops") or []:
-            if isinstance(loop, dict) and loop.get("source_msg") and loop["source_msg"] not in found:
+            if not isinstance(loop, dict):
+                continue
+            loop["source_msg"], loop["closed_by"] = msg_id(loop.get("source_msg")), msg_id(loop.get("closed_by"))
+            if loop["source_msg"] and loop["source_msg"] not in found:
                 found[loop["source_msg"]] = loop
         for upd in reply.get("updates") or []:
-            if isinstance(upd, dict) and upd.get("source_msg") in found:
-                found[upd["source_msg"]].update({k: upd.get(k) for k in ("status", "closed_by")})
+            if isinstance(upd, dict) and msg_id(upd.get("source_msg")) in found:
+                found[msg_id(upd["source_msg"])].update({"status": upd.get("status"), "closed_by": msg_id(upd.get("closed_by"))})
     return list(found.values())
 
 

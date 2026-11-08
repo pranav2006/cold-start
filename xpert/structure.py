@@ -13,6 +13,8 @@ from collections import Counter, defaultdict
 
 from .data import ME, clean, words
 
+CIRCLES = {"spouse", "child", "parent", "in-law", "sibling", "relative", "friend", "colleague", "client", "vendor", "partner", "staff"}
+
 # ---------------------------------------------------------------- vocabularies
 # Words in a contact name or group name that say what someone is. Hindi/Bengali kinship terms are
 # included because that is how people actually save relatives.
@@ -35,9 +37,12 @@ VENDOR_WORDS = {
     "travels", "tours", "pharmacy", "chemist", "mart", "dealer", "supplier",
 }
 FAMILY_GROUP_WORDS = {"family", "siblings", "cousins", "sisters", "brothers", "parivar", "khandan", "bro", "sis"}
-HOME_GROUP_WORDS = {"kitchen", "maid", "maids", "cook", "driver", "drivers", "carpool", "society", "flat", "building", "staff", "household"}
+HOME_GROUP_WORDS = {"ghar", "kitchen", "maid", "maids", "cook", "driver", "drivers", "carpool", "society", "flat", "building", "staff", "household"}
 # Business communities: these belong to Arjun's main company rather than to anyone in them.
 WORK_COMMUNITY_WORDS = {"d2c", "d2b", "marketers", "ecommerce", "startups"}
+# Words that mark a company's own team group ("Zest operations", "Zest team"): if the rest of the
+# name is not a company we know, it is a company we did not know about.
+TEAM_WORDS = {"operations", "ops", "team", "finance", "accounts", "internal", "core", "admin", "management"}
 # Words that describe a group rather than name a client brand ("Acme Operations", "Acme: Finance").
 GENERIC_GROUP_WORDS = {
     "operations", "ops", "team", "finance", "accounts", "ads", "ad", "targeting", "marketing", "community",
@@ -62,6 +67,9 @@ def aliases_for(name):
     out = {clean(name).lower(), re.sub(r"\W", "", name.lower())}
     if acronym(name):
         out.add(acronym(name))
+    parts = clean(name).lower().split()
+    if len(parts) > 1 and len(parts[0]) >= 4:  # "Brightside Design" also shows up as just "Brightside"
+        out.add(parts[0])
     return {a for a in out if len(a) >= 2}
 
 
@@ -109,6 +117,24 @@ def find_organisations(d):
             brand = [w for w in words(c["name"]) if w not in GENERIC_GROUP_WORDS and not mentions(w, orgs[oid]["aliases"])]
             if brand:
                 client_groups[c["chat_id"]] = brand
+
+    # Rule A2: a team group ("Zest operations") of a company not in the seed is a new company.
+    for c in groups:
+        toks = words(c["name"])
+        if c["chat_id"] in chat_org or not set(toks) & TEAM_WORDS:
+            continue
+        if set(toks) & (FAMILY_GROUP_WORDS | HOME_GROUP_WORDS | WORK_COMMUNITY_WORDS):
+            continue
+        brand = [w for w in re.findall(r"[^\W\d_]+", clean(c["name"])) if w.lower() not in GENERIC_GROUP_WORDS | TEAM_WORDS]
+        if not brand:
+            continue
+        name = " ".join(brand)
+        oid = next((o for o in orgs if orgs[o]["name"].lower() == name.lower() or mentions(name, orgs[o]["aliases"])), None)
+        if not oid:
+            oid = f"org{len(orgs) + 1}"
+            orgs[oid] = new_org(oid, name, "company", "work", "other")
+            work_ids.append(oid)
+        chat_org[c["chat_id"]] = oid
 
     # Rule B: a group made up mostly of a company's internal team belongs to that company.
     internal_members = defaultdict(set)
@@ -286,10 +312,15 @@ def find_links(d, orgs, chat_org, circles):
     return links
 
 
-def build(d):
-    """Run every rule and return the people, organisations and chats parts of the output, plus notes."""
+def build(d, refine=None):
+    """Run every rule and return the people, organisations and chats parts of the output, plus notes.
+
+    refine(circles, why, org_names) -> (circles, why) lets the model correct circles before links
+    are worked out, since links depend on circles."""
     orgs, chat_org, client_groups = find_organisations(d)
     circles, why = guess_circles(d, orgs, chat_org, client_groups)
+    if refine:
+        circles, why = refine(circles, why, [o["name"] for o in orgs.values() if o["type"] == "company"])
     links = find_links(d, orgs, chat_org, circles)
     people = []
     for pid in d.people:
