@@ -19,7 +19,7 @@ from .data import ME, clean
 from .structure import CIRCLES, deals_with, last_name
 
 BATCH = int(os.environ.get("PEOPLE_BATCH", "12"))
-WORKERS = int(os.environ.get("LOOPS_WORKERS", "6"))
+WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
 STRONG_RULES = {"seed", "kinship word in contact name", "surname + busiest 1:1 chat"}
 LINE_CHARS = 140
 
@@ -97,9 +97,7 @@ def refine_circles(d, circles, why, org_names):
     circles, why = dict(circles), dict(why)
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         for batch, reply in zip(batches, pool.map(ask, batches)):
-            for item in reply.get("people") or []:
-                if not isinstance(item, dict):
-                    continue
+            for item in model.items(reply, "people"):
                 pid, circle = item.get("id"), item.get("circle")
                 if pid in batch and circle in CIRCLES and circle != circles[pid]:
                     why[pid] = f"model (rules said {circles[pid]}: {why[pid]})"

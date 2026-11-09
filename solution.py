@@ -7,6 +7,8 @@ Step 1: rules for people, organisations and chats (free).
 Step 2: the model finds open loops, and code checks them (xpert/loops.py).
 Step 3: the model corrects unsure circles from short profiles (xpert/people.py), and finds goals in
         Arjun's own messages (xpert/goals.py). Goals and loops run at the same time.
+Step 4: where to help with each open loop (xpert/help.py): others' loops are left alone, Arjun's own
+        go to the model.
 If no model is configured (no LLM_* variables), the run still finishes with the rule-based parts.
 """
 import json
@@ -19,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from xpert.data import load  # noqa: E402
 from xpert.goals import find_goals, hint_summary  # noqa: E402
+from xpert.help import decide_help  # noqa: E402
 from xpert.loops import find_loops  # noqa: E402
 from xpert.people import refine_circles  # noqa: E402
 from xpert.structure import build  # noqa: E402
@@ -34,6 +37,7 @@ def main(input_dir, output_path):
         goals_job = pool.submit(find_goals, d, circles)
         loops = find_loops(d, circles)
         goals, hints = goals_job.result()
+    decide_help(d, loops, circles)
     s["notes"]["goal_hints"] = hints
     out = {
         "people": s["people"],

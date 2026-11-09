@@ -32,7 +32,7 @@ PER_AREA = 2  # answers match one to one, so a third goal in one area is almost 
 MAX_EVIDENCE = 20  # extra evidence costs nothing and raises the chance of sharing a message with the answer
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 CHUNK_CHARS = int(os.environ.get("GOALS_CHUNK_CHARS", "8000"))
-WORKERS = int(os.environ.get("LOOPS_WORKERS", "6"))
+WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
 TIME_BUDGET = int(os.environ.get("LOOPS_TIME_BUDGET", str(22 * 60)))
 
 HINT_SYSTEM = """You read Arjun's own WhatsApp messages (each with the message he was replying to) and find the ones that show a GOAL he holds.
@@ -144,7 +144,7 @@ def find_hints(d, circles):
         if time.time() > deadline:
             return []
         reply = model.ask_json(HINT_SYSTEM, "\n".join(lines), max_tokens=6000) or {}
-        hints = [h for h in reply.get("goals") or [] if isinstance(h, dict)]
+        hints = model.items(reply, "goals")
         for h in hints:  # models sometimes rename fields ("new_goal", "message_id"): accept the usual ones
             h["msg"] = msg_id(h.get("msg") or h.get("message_id") or h.get("id"))
             h["goal"] = h.get("goal") or h.get("new_goal") or h.get("title")
@@ -186,7 +186,7 @@ def merge(d, hints):
     seed_text = ("He already told us this goal; do not list it again: " + "; ".join(seed_goals)) if seed_goals else ""
     system = SYSTEM.replace("{max_goals}", str(MAX_GOALS)).replace("{seed}", seed_text)
     reply = model.ask_json(system, "\n".join(lines), max_tokens=6000)
-    goals = tidy((reply or {}).get("goals") or [], set(msg))
+    goals = tidy(model.items(reply, "goals"), set(msg))
     if not goals:
         goals = tidy(fallback(hints), set(msg))
     return goals

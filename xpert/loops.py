@@ -5,8 +5,8 @@ How it works:
   2. Long chats are cut into parts sent in order; each part is told which loops are still open from the
      parts before, so a request on Monday can be closed by a "paid" on Thursday.
   3. Small chats are packed several to a request, to save cost.
-  4. Code checks every answer: message ids must exist, a loop can only be "done" if a real later message
-     shows it, and help is only given for open loops.
+  4. Code checks every answer: message ids must exist, and a loop can only be "done" if a real later
+     message shows it. Where to help is decided afterwards, for open loops only (help.py).
 """
 import datetime as dt
 import os
@@ -21,12 +21,15 @@ IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 # About 1,700 tokens of chat per request. Measured on dev: 6,000 found twice the loops of 12,000, because
 # a small model skims long input.
 CHUNK_CHARS = int(os.environ.get("LOOPS_CHUNK_CHARS", "6000"))
-WORKERS = int(os.environ.get("LOOPS_WORKERS", "6"))
+WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
 TIME_BUDGET = int(os.environ.get("LOOPS_TIME_BUDGET", str(22 * 60)))  # stop starting new work after this
+# Only loops raised in the last two weeks are scored (loops raised earlier are dropped from both sides),
+# so the loops pass reads only the last WINDOW_DAYS: two weeks plus a margin in case the cut-off is
+# counted a little differently. On the six-week hidden set this cuts the biggest cost to about 40%.
+WINDOW_DAYS = float(os.environ.get("LOOPS_WINDOW_DAYS", "16"))
 DEBUG = bool(os.environ.get("LOOPS_DEBUG"))
 MAX_BODY = 400
 TYPES = {"commitment", "followup", "deadline", "question"}
-LEAVE_REASONS = ("someone else's", "too personal", "would annoy him")
 
 SYSTEM = """You read the WhatsApp chats of Arjun (shown as "Arjun") and list EVERY LOOP in them: each request, promise, deadline or question that needed a later action involving Arjun.
 List a loop even if it was finished later in the chat: then mark it "done". Most loops get finished, and they still count. Small everyday asks count too ("Pls pay 1500 for the milk", "Can you send me the link", "Pls order a school bag for the kids").
@@ -37,6 +40,10 @@ Loop types:
 - deadline: something Arjun must do by a specific date or time (a fee due by a date, a booking cut-off, wishing someone on their birthday today).
 - question: Arjun must decide or answer something (pick a meeting time, yes/no, choose between options).
 
+Easy to miss: when others in a group wish someone a happy birthday or anniversary, or congratulate them, Arjun should do the same (deadline, today; "done" if he did). An invitation, or a meeting time someone proposes, is a question for Arjun (confirm, or add it to his calendar).
+
+In groups, be strict. Count: requests addressed to Arjun (his name, a reply to something he said) or clearly his to act on; promises someone makes in a small group he is in ("I'll send the invoice today": a followup owned by them); birthdays and invitations as above. Do not count: routine tickets in an operations group (update a bill, change an ad, process an id), requests tagging someone else, questions asked to a whole community group.
+
 Not loops: chit-chat, forwarded news or links, group announcements that ask nothing of Arjun, things between other people, things already settled within the same message.
 
 For each loop:
@@ -45,13 +52,9 @@ For each loop:
 - owner: "ME" if Arjun owes the next action, "THEM" if someone else does.
 - due: "YYYY-MM-DD" if a date is stated or clearly implied ("tomorrow", "by Saturday": use the day headers), else null.
 - status: "done" ONLY if a LATER message clearly shows it happened (payment sent, "done", "ordered", "sent", the answer given, the meeting fixed); put that message id in closed_by. "dropped" only if clearly cancelled or abandoned, with closed_by. Otherwise "open" with closed_by null. When unsure, say "open".
-- help: only when status is "open", else null. Choose one:
-  - {"action":"assist","next_step":"<one line>","needs_yes":true|false}: the assistant can move it forward itself (look up options, draft a reply, prepare an order or booking). needs_yes is true if the step sends, pays, books or otherwise leaves the phone or can't be undone.
-  - {"action":"remind","remind_at":"YYYY-MM-DDTHH:MM:00+05:30"}: only Arjun can do it (a call, a visit, a payment, his own decision); pick a sensible time before it is due.
-  - {"action":"leave","reason":"someone else's"|"too personal"|"would annoy him"}: stay out. Use it for emotional or intimate family matters, for loops someone else owns where a nudge adds nothing, and for small things he will obviously handle himself.
 
 One loop per real task: do not split one request into several loops or list the same task twice.
-Reply with JSON only: {"loops":[{"chat_id":"...","source_msg":"...","title":"...","type":"...","owner":"ME|THEM","due":null,"status":"open","closed_by":null,"help":{...}}],"updates":[{"source_msg":"...","status":"done|dropped","closed_by":"..."}]}
+Reply with JSON only: {"loops":[{"chat_id":"...","source_msg":"...","title":"...","type":"...","owner":"ME|THEM","due":null,"status":"open","closed_by":null}],"updates":[{"source_msg":"...","status":"done|dropped","closed_by":"..."}]}
 "updates" is only for loops listed as still open from earlier parts of a chat."""
 
 
@@ -108,13 +111,14 @@ def split_parts(lines, budget):
     return parts
 
 
-def plan_jobs(d, circles):
+def plan_jobs(d, circles, since=0):
     """Return jobs. A job is a list of requests that must run in order; each request is a list of
-    (chat_id, header, lines) blocks. Big chats become multi-request jobs; small chats are packed."""
+    (chat_id, header, lines) blocks. Big chats become multi-request jobs; small chats are packed.
+    Only messages at or after `since` (unix seconds) are read."""
     jobs, pack, pack_size = [], [], 0
     sized = []
     for cid in d.chats:
-        msgs = d.by_chat.get(cid, [])
+        msgs = [m for m in d.by_chat.get(cid, []) if m["ts"] >= since]
         if msgs:
             lines = format_lines(msgs)
             sized.append((sum(len(x) + 1 for x in lines), cid, lines))
@@ -157,13 +161,13 @@ def run_job(job, end_label, deadline):
                   f"-> {'FAILED' if reply is None else f'{n} loops'}", flush=True)
         if not reply:
             continue
-        for loop in reply.get("loops") or []:
+        for loop in model.items(reply, "loops"):
             if not isinstance(loop, dict):
                 continue
             loop["source_msg"], loop["closed_by"] = msg_id(loop.get("source_msg")), msg_id(loop.get("closed_by"))
             if loop["source_msg"] and loop["source_msg"] not in found:
                 found[loop["source_msg"]] = loop
-        for upd in reply.get("updates") or []:
+        for upd in reply.get("updates") if isinstance(reply.get("updates"), list) else []:
             if isinstance(upd, dict) and msg_id(upd.get("source_msg")) in found:
                 found[msg_id(upd["source_msg"])].update({"status": upd.get("status"), "closed_by": msg_id(upd.get("closed_by"))})
     return list(found.values())
@@ -171,17 +175,9 @@ def run_job(job, end_label, deadline):
 
 # ---------------------------------------------------------------- checking the answers
 
-def iso_ok(s):
-    try:
-        return dt.datetime.fromisoformat(s) is not None
-    except (TypeError, ValueError):
-        return False
-
-
 def tidy(d, raw, end_ts):
     """Turn the model's loops into valid output entries, dropping anything we can't verify."""
     msg = {m["id"]: m for m in d.messages}
-    end_day = dt.datetime.fromtimestamp(end_ts, IST).date()
     out, seen = [], set()
     for l in raw:
         src = msg.get(l.get("source_msg"))
@@ -205,30 +201,9 @@ def tidy(d, raw, end_ts):
         if status not in ("done", "dropped") or not closer or closer["chat_id"] != cid or closer["ts"] < src["ts"] or closer["id"] == src["id"]:
             status, closed_by = "open", None
 
-        entry = {"title": clean(str(l.get("title") or "Follow up"))[:160], "type": typ, "owner": owner, "chat_id": cid,
-                 "source_msg": src["id"], "due": due, "status": status, "closed_by": closed_by, "help": None}
-        if status == "open":
-            entry["help"] = tidy_help(l.get("help"), owner, due, end_day)
-        out.append(entry)
+        out.append({"title": clean(str(l.get("title") or "Follow up"))[:160], "type": typ, "owner": owner, "chat_id": cid,
+                    "source_msg": src["id"], "due": due, "status": status, "closed_by": closed_by, "help": None})
     return out
-
-
-def tidy_help(h, owner, due, end_day):
-    h = h if isinstance(h, dict) else {}
-    action = h.get("action")
-    if action not in ("assist", "remind", "leave"):
-        action = "remind" if owner == ME else "leave"
-    if action == "assist":
-        return {"action": "assist", "next_step": clean(str(h.get("next_step") or "Draft the next message for Arjun"))[:200],
-                "needs_yes": bool(h.get("needs_yes", True))}
-    if action == "remind":
-        when = h.get("remind_at")
-        if not iso_ok(when):
-            day = dt.date.fromisoformat(due) if due else end_day + dt.timedelta(days=1)
-            when = f"{day.isoformat()}T09:00:00+05:30"
-        return {"action": "remind", "remind_at": when}
-    reason = h.get("reason") if h.get("reason") in LEAVE_REASONS else ("someone else's" if owner != ME else "would annoy him")
-    return {"action": "leave", "reason": reason}
 
 
 def find_loops(d, circles):
@@ -237,7 +212,7 @@ def find_loops(d, circles):
         return []
     end_ts = d.messages[-1]["ts"]
     end_label = day_label(end_ts)
-    jobs = plan_jobs(d, circles)
+    jobs = plan_jobs(d, circles, since=end_ts - WINDOW_DAYS * 86400)
     deadline = time.time() + TIME_BUDGET
     raw = []
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
