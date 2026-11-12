@@ -31,6 +31,10 @@ def parse_json(text):
     """Pull the first JSON object out of a reply, even if it is wrapped in ```json fences or prose."""
     if not text:
         return None
+    # Reasoning models may write their thinking first (<think>...</think>, <thought>...</thought>); drop it,
+    # or a "{" inside the thinking is mistaken for the answer.
+    text = re.sub(r"<(think|thought|thinking)>.*?</\1>", "", text, flags=re.S | re.I)
+    text = re.sub(r"^\s*<(think|thought|thinking)>.*", "", text, flags=re.S | re.I)  # unclosed: nothing usable
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip())
     try:
         return json.loads(text)
