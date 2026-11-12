@@ -1,14 +1,3 @@
-"""Where to help: for each loop still open at the end, assist, remind or leave.
-
-The scoring decides the policy. A right action earns 1. Saying assist or remind where Arjun wanted to
-be left alone costs 1. Mixing up assist and remind costs nothing, and "leave" can never lose a point.
-So:
-  - Loops someone else owns get "leave" in code, no model needed ("someone else's" is one of the
-    brief's own reasons, and a nudge about another person's task is what annoys people).
-  - Arjun's own open loops go to the model in batches, with the message that raised them and what
-    came right after, and a prompt that only says assist or remind when it is clearly wanted.
-  - If the model fails, his own loops fall back to "remind": the most common right answer for them.
-"""
 import datetime as dt
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -37,7 +26,6 @@ Reply with JSON only: {"help":[{"n":1,"step":4,"action":"assist","next_step":"..
 
 
 def iso_after(value, end_ts):
-    """value if it is a valid ISO time after the end of the data, else None."""
     try:
         t = dt.datetime.fromisoformat(str(value))
     except ValueError:
@@ -48,7 +36,6 @@ def iso_after(value, end_ts):
 
 
 def default_remind(due, end_ts):
-    """9 am on the due date if that is still ahead, else 9 am the day after the data ends."""
     end_day = dt.datetime.fromtimestamp(end_ts, IST).date()
     day = end_day + dt.timedelta(days=1)
     if due:
@@ -72,7 +59,6 @@ def tidy(h, loop, end_ts):
 
 
 def describe(d, n, loop, circles):
-    """One loop as the model sees it: what, where, due, the source message and what followed."""
     chat = d.chats[loop["chat_id"]]
     msgs = d.by_chat[loop["chat_id"]]
     i = next((k for k, m in enumerate(msgs) if m["id"] == loop["source_msg"]), 0)
@@ -90,7 +76,6 @@ def describe(d, n, loop, circles):
 
 
 def decide_help(d, loops, circles):
-    """Fill in help for every open loop, in place. Others' loops: leave. Arjun's: the model decides."""
     if not d.messages:
         return loops
     end_ts = d.messages[-1]["ts"]
@@ -101,7 +86,7 @@ def decide_help(d, loops, circles):
         elif loop["owner"] != ME:
             loop["help"] = {"action": "leave", "reason": "someone else's"}
         else:
-            loop["help"] = tidy({}, loop, end_ts)  # fallback until the model answers
+            loop["help"] = tidy({}, loop, end_ts)
             mine.append(loop)
     if not mine or not model.available():
         return loops

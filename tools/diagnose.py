@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""Show what we got wrong against a labelled folder, so each fix targets a real mistake.
-
-    python3 tools/diagnose.py data/dev out.json [circles|orgs|chats|loops]
-
-Uses check.py's own scoring, so the numbers always agree with the official checker.
-"""
 import json
 import sys
 from collections import Counter
@@ -14,8 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.stdout.reconfigure(encoding="utf-8")
 
-import check  # noqa: E402
-from xpert.data import load  # noqa: E402
+import check
+from xpert.data import load
 
 
 def main(folder, out_path, part=None):
@@ -91,5 +85,5 @@ if __name__ == "__main__":
         show_loops(load(sys.argv[1]), json.loads(Path(sys.argv[2]).read_text(encoding="utf-8")), ans_)
         sys.exit()
     if len(sys.argv) < 3:
-        sys.exit(__doc__)
+        sys.exit('usage: python3 tools/diagnose.py data/dev out.json [circles|orgs|chats|loops]')
     main(*sys.argv[1:4])

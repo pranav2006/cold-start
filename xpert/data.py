@@ -1,7 +1,3 @@
-"""Load an input folder and build the lookups every later step uses.
-
-Nothing here guesses anything: it only reads and indexes the data.
-"""
 import json
 import re
 import unicodedata
@@ -18,38 +14,33 @@ def read_jsonl(path):
 
 
 def clean(text):
-    """Drop invisible marks (WhatsApp exports are full of them) and squeeze spaces."""
     text = "".join(ch for ch in (text or "") if unicodedata.category(ch) not in ("Cf", "Mn", "Cc"))
     return re.sub(r"\s+", " ", text).strip()
 
 
 def msg_id(value):
-    """A message id from a model reply. Models sometimes copy the whole line ("M00391 14:57 Priya: ..."),
-    so take the first token only."""
     parts = str(value or "").replace(",", " ").split()
     return parts[0] if parts else None
 
 
 def words(text):
-    """Lowercase word tokens, keeping letters/digits from any script."""
     return re.findall(r"\w+", clean(text).lower())
 
 
 @dataclass
 class Data:
-    chats: dict  # chat_id -> chat
-    messages: list  # in time order
+    chats: dict
+    messages: list
     seed: dict
-    by_chat: dict = field(default_factory=dict)  # chat_id -> [messages]
-    people: list = field(default_factory=list)  # every person id except ME
-    chats_of: dict = field(default_factory=dict)  # person id -> [chat ids]
-    dm_of: dict = field(default_factory=dict)  # person id -> their 1:1 chat id
-    names: dict = field(default_factory=dict)  # person id -> Counter of every name we saw for them
-    sent: Counter = field(default_factory=Counter)  # person id -> messages sent
+    by_chat: dict = field(default_factory=dict)
+    people: list = field(default_factory=list)
+    chats_of: dict = field(default_factory=dict)
+    dm_of: dict = field(default_factory=dict)
+    names: dict = field(default_factory=dict)
+    sent: Counter = field(default_factory=Counter)
     me_name: str = ""
 
     def contact_names(self, pid):
-        """Every name Arjun's phone shows for this person: the 1:1 chat title and their sender names."""
         out = list(self.names.get(pid, {}))
         if pid in self.dm_of:
             out.append(self.chats[self.dm_of[pid]]["name"])

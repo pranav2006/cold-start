@@ -1,19 +1,3 @@
-"""Goals: up to 10 goals Arjun holds, each with the messages that show it.
-
-Two steps:
-  1. Hints. A goal is something Arjun himself says or answers ("I'll book Coorg", "Yes, 4 runs a
-     week"), so we read only his own messages, each with the message he was replying to: about 15% of
-     the text. Batched like the loops pass, each request lists the messages that show a goal.
-  2. Merge. Hints repeat each other ("gym at 7" on five days is one habit), so one small last request
-     merges them: same goal -> one entry, with all its hint messages as evidence. Code checks every field.
-
-We first tried asking the loops pass to note goal hints on the side (no extra input tokens), but the
-small model, busy with loops, returned 4 hints for 4,500 messages. A focused prompt does far better.
-
-Why evidence matters: a goal is scored as right when its area matches and at least one evidence
-message is shared with the answer, so listing every supporting message raises the chance of a match
-at no cost. Invented goals cost points, so the merge is told to keep only goals the messages support.
-"""
 import datetime as dt
 import os
 import time
@@ -27,9 +11,9 @@ from .loops import chat_header, format_lines, split_parts
 AREAS = {"self", "spouse", "kids", "parents", "work", "friends", "experiences", "finances", "health", "home"}
 TYPES = {"habit", "milestone", "experience"}
 HORIZONS = {"3mo", "1yr", "3yr", "5yr"}
-MAX_GOALS = 6  # the cap is 10; fewer, better-supported goals score higher when precision counts
-PER_AREA = 2  # answers match one to one, so a third goal in one area is almost always a split-up duplicate
-MAX_EVIDENCE = 20  # extra evidence costs nothing and raises the chance of sharing a message with the answer
+MAX_GOALS = 6
+PER_AREA = 2
+MAX_EVIDENCE = 20
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
 CHUNK_CHARS = int(os.environ.get("GOALS_CHUNK_CHARS", "8000"))
 WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
@@ -68,7 +52,6 @@ def default_type(area):
 
 
 def tidy(goals, msg_ids):
-    """Keep valid goals only: known area, real evidence ids, sensible defaults for the rest."""
     out, used = [], set()
     for g in goals:
         if not isinstance(g, dict) or g.get("area") not in AREAS:
@@ -85,7 +68,6 @@ def tidy(goals, msg_ids):
             "horizon": g.get("horizon") if g.get("horizon") in HORIZONS else "1yr",
             "evidence": evidence,
         })
-    # Best supported first (stable, so the model's order breaks ties), then the per-area and total caps.
     out.sort(key=lambda g: -len(g["evidence"]))
     kept, per_area = [], Counter()
     for g in out:
@@ -96,7 +78,6 @@ def tidy(goals, msg_ids):
 
 
 def fallback(hints):
-    """No merge reply: group hints that share an area and title, best supported first."""
     groups = defaultdict(list)
     for h in hints:
         groups[(h["area"], clean(h["goal"]).lower())].append(h["msg"])
@@ -105,7 +86,6 @@ def fallback(hints):
 
 
 def own_turns(msgs):
-    """Arjun's messages, each with the message just before it if someone else wrote that one."""
     keep = []
     for i, m in enumerate(msgs):
         if m["sender_id"] != ME:
@@ -117,7 +97,6 @@ def own_turns(msgs):
 
 
 def plan_requests(d, circles):
-    """Pack each chat's turns into requests of about CHUNK_CHARS; big chats are split."""
     requests, cur, size = [], [], 0
     for cid in d.chats:
         turns = own_turns(d.by_chat.get(cid, []))
@@ -137,7 +116,6 @@ def plan_requests(d, circles):
 
 
 def find_hints(d, circles):
-    """Step 1: every message that shows a goal. Returns raw hint dicts."""
     deadline = time.time() + TIME_BUDGET
 
     def ask(lines):
@@ -145,7 +123,7 @@ def find_hints(d, circles):
             return []
         reply = model.ask_json(HINT_SYSTEM, "\n".join(lines), max_tokens=6000) or {}
         hints = model.items(reply, "goals")
-        for h in hints:  # models sometimes rename fields ("new_goal", "message_id"): accept the usual ones
+        for h in hints:
             h["msg"] = msg_id(h.get("msg") or h.get("message_id") or h.get("id"))
             h["goal"] = h.get("goal") or h.get("new_goal") or h.get("title")
         return hints
@@ -158,7 +136,6 @@ def find_hints(d, circles):
 
 
 def find_goals(d, circles):
-    """The whole goals step. Returns (goals, hints); both empty without a model."""
     if not model.available() or not d.messages:
         return [], []
     hints = find_hints(d, circles)
@@ -166,7 +143,6 @@ def find_goals(d, circles):
 
 
 def merge(d, hints):
-    """Step 2: one request merges the hints into at most MAX_GOALS goals."""
     msg = {m["id"]: m for m in d.messages}
     hints = [h for h in hints if h.get("msg") in msg and h.get("area") in AREAS and h.get("goal")]
     seen = set()
@@ -193,5 +169,4 @@ def merge(d, hints):
 
 
 def hint_summary(hints):
-    """For debugging: how many hints per area."""
     return dict(Counter(h.get("area") for h in hints))

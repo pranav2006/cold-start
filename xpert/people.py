@@ -1,16 +1,3 @@
-"""Circles, second opinion: the model reads a short profile of each person the rules were unsure about.
-
-Rules (structure.py) are good when Arjun saved a contact with a tag ("Kamla Mausi", "Suresh Driver"),
-but most contacts are just a name, and the rules then fall back to a guess ("friend", or "client"
-because someone sits in one client group). A human would read a few of their messages and know at
-once. That is what this step does, cheaply:
-
-  - Only people Arjun deals with (a 1:1 chat, a tagged name, or active in a small group) get a profile.
-  - A profile is a few hundred characters: saved names, shared groups, the rule's guess, and a sample
-    of their 1:1 chat (or of their group messages if there is no 1:1 chat).
-  - Profiles are batched, about 12 per request.
-  - Strong rules (seed, a kinship word in the name, the spouse rule) are never overridden.
-"""
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,8 +8,6 @@ from .structure import CIRCLES, known_contact, last_name
 BATCH = int(os.environ.get("PEOPLE_BATCH", "12"))
 WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
 STRONG_RULES = {"seed", "kinship word in contact name", "surname + busiest 1:1 chat"}
-# Family signals the model may sharpen (relative -> sibling) but not leave (relative -> client): on dev,
-# everyone the surname or family-group rule caught was family, and the model's one move out was wrong.
 FAMILY_RULES = {"shares Arjun's surname", "in a family group"}
 FAMILY = {"spouse", "parent", "in-law", "sibling", "child", "relative"}
 LINE_CHARS = 140
@@ -78,7 +63,6 @@ def profile(d, pid, rule_circle, rule_why, sample_lines=10):
 
 
 def wanted(d, pid):
-    """People worth a profile: Arjun deals with them directly, or they talk in a small group."""
     if pid in (d.seed.get("circles") or {}):
         return False
     small_active = d.sent[pid] >= 3 and any(
@@ -87,7 +71,6 @@ def wanted(d, pid):
 
 
 def refine_circles(d, circles, why, org_names):
-    """Return (circles, why) with the model's corrections applied. Unchanged if no model is set."""
     if not model.available():
         return circles, why
     todo = [p for p in d.people if wanted(d, p) and why.get(p) not in STRONG_RULES]

@@ -1,13 +1,3 @@
-"""Open loops: things that still need doing, found by the model and checked by code.
-
-How it works:
-  1. Each chat becomes compact lines:  "M00391 14:57 Priya: Pls pay 1500 for the milk", with a header for each day.
-  2. Long chats are cut into parts sent in order; each part is told which loops are still open from the
-     parts before, so a request on Monday can be closed by a "paid" on Thursday.
-  3. Small chats are packed several to a request, to save cost.
-  4. Code checks every answer: message ids must exist, and a loop can only be "done" if a real later
-     message shows it. Where to help is decided afterwards, for open loops only (help.py).
-"""
 import datetime as dt
 import os
 import re
@@ -18,14 +8,9 @@ from . import model
 from .data import ME, clean, msg_id
 
 IST = dt.timezone(dt.timedelta(hours=5, minutes=30))
-# About 1,700 tokens of chat per request. Measured on dev: 6,000 found twice the loops of 12,000, because
-# a small model skims long input.
 CHUNK_CHARS = int(os.environ.get("LOOPS_CHUNK_CHARS", "6000"))
 WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
-TIME_BUDGET = int(os.environ.get("LOOPS_TIME_BUDGET", str(22 * 60)))  # stop starting new work after this
-# Only loops raised in the last two weeks are scored (loops raised earlier are dropped from both sides),
-# so the loops pass reads only the last WINDOW_DAYS: two weeks plus a margin in case the cut-off is
-# counted a little differently. On the six-week hidden set this cuts the biggest cost to about 40%.
+TIME_BUDGET = int(os.environ.get("LOOPS_TIME_BUDGET", str(22 * 60)))
 WINDOW_DAYS = float(os.environ.get("LOOPS_WINDOW_DAYS", "16"))
 DEBUG = bool(os.environ.get("LOOPS_DEBUG"))
 MAX_BODY = 400
@@ -58,8 +43,6 @@ Reply with JSON only: {"loops":[{"chat_id":"...","source_msg":"...","title":"...
 "updates" is only for loops listed as still open from earlier parts of a chat."""
 
 
-# ---------------------------------------------------------------- formatting
-
 def short_name(name):
     name = clean(name)
     return name.split()[0] if name else "?"
@@ -70,7 +53,6 @@ def day_label(ts):
 
 
 def format_lines(msgs):
-    """Messages as compact lines, with a header whenever the day changes."""
     out, last_day = [], None
     for m in msgs:
         day = day_label(m["ts"])
@@ -96,7 +78,6 @@ def chat_header(d, cid, circles):
 
 
 def split_parts(lines, budget):
-    """Cut one chat's lines into parts of at most `budget` characters, repeating the day header."""
     parts, cur, size, day = [], [], 0, None
     for line in lines:
         if line.startswith("--- "):
@@ -112,9 +93,6 @@ def split_parts(lines, budget):
 
 
 def plan_jobs(d, circles, since=0):
-    """Return jobs. A job is a list of requests that must run in order; each request is a list of
-    (chat_id, header, lines) blocks. Big chats become multi-request jobs; small chats are packed.
-    Only messages at or after `since` (unix seconds) are read."""
     jobs, pack, pack_size = [], [], 0
     sized = []
     for cid in d.chats:
@@ -137,11 +115,8 @@ def plan_jobs(d, circles, since=0):
     return jobs
 
 
-# ---------------------------------------------------------------- calling the model
-
 def run_job(job, end_label, deadline):
-    """Run one job's requests in order, carrying open loops from part to part. Returns raw loop dicts."""
-    found = {}  # source_msg -> loop
+    found = {}
     for request in job:
         if time.time() > deadline:
             break
@@ -173,10 +148,7 @@ def run_job(job, end_label, deadline):
     return list(found.values())
 
 
-# ---------------------------------------------------------------- checking the answers
-
 def tidy(d, raw, end_ts):
-    """Turn the model's loops into valid output entries, dropping anything we can't verify."""
     msg = {m["id"]: m for m in d.messages}
     out, seen = [], set()
     for l in raw:
@@ -184,7 +156,7 @@ def tidy(d, raw, end_ts):
         if not src or src["id"] in seen:
             continue
         seen.add(src["id"])
-        cid = src["chat_id"]  # trust the message, not the model's chat_id
+        cid = src["chat_id"]
         others = [p for p in d.chats[cid]["participants"] if p != ME]
         typ = l.get("type") if l.get("type") in TYPES else "commitment"
         if str(l.get("owner", "ME")).upper() == "ME":
@@ -197,7 +169,6 @@ def tidy(d, raw, end_ts):
 
         status, closed_by = l.get("status"), l.get("closed_by")
         closer = msg.get(closed_by)
-        # A loop is only closed if a real message in the same chat, after the source, shows it.
         if status not in ("done", "dropped") or not closer or closer["chat_id"] != cid or closer["ts"] < src["ts"] or closer["id"] == src["id"]:
             status, closed_by = "open", None
 
@@ -207,7 +178,6 @@ def tidy(d, raw, end_ts):
 
 
 def find_loops(d, circles):
-    """The whole open-loops step. Returns a list of output entries (empty if no model is configured)."""
     if not model.available() or not d.messages:
         return []
     end_ts = d.messages[-1]["ts"]

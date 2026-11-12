@@ -1,19 +1,4 @@
 #!/usr/bin/env python3
-"""Turn a Claude Code session transcript (.jsonl) into a readable, data-free Markdown log for ai-logs/.
-
-    python3 tools/export_ai_log.py <transcript.jsonl> <data_dir> <out.md>
-
-What it keeps: the user's messages, the assistant's replies, and one line per tool call (its short
-description, e.g. "ran: Score the rules-only output on dev"). What it drops: tool outputs, tool inputs,
-hidden reasoning, and system notes, because that is where raw chat data and file contents sit.
-
-Then it redacts, because the challenge data must not be shared or committed:
-  - every word that occurs in a contact or chat name in <data_dir>, unless the same word also occurs in
-    the starter kit or our own code (so "Home", "Office", "Arjun" from the brief stay; real-looking
-    names become [name]);
-  - any quoted text that matches a message in <data_dir> -> [message text];
-  - e-mail addresses and anything shaped like an API key.
-"""
 import json
 import re
 import sys
@@ -24,7 +9,6 @@ KIT_FILES = ["README.md", "WRITEUP.md", "check.py", "schema.json", "llm.py", "so
 
 
 def safe_words():
-    """Words that appear in the kit or our code: generic, or already public in the brief."""
     text = " ".join((ROOT / f).read_text(encoding="utf-8") for f in KIT_FILES if (ROOT / f).exists())
     for f in list((ROOT / "xpert").glob("*.py")) + list((ROOT / "example").glob("*")):
         if f.is_file():
@@ -33,7 +17,6 @@ def safe_words():
 
 
 def data_vocab(data_dir):
-    """Name words from the data (senders and chat names) that are not safe words, and all message bodies."""
     safe = safe_words()
     names, bodies = set(), []
     for line in open(Path(data_dir) / "chats.jsonl", encoding="utf-8"):
@@ -59,7 +42,6 @@ def redact(text, names, bodies):
 
 
 def strip_noise(text):
-    """Remove harness wrappers (system reminders, IDE context) from a user message."""
     text = re.sub(r"<(system-reminder|ide_selection|ide_opened_file)[^>]*>.*?</\1[^>]*>", "", text, flags=re.S)
     return text.strip()
 
@@ -105,5 +87,5 @@ def main(transcript, data_dir, out):
 
 if __name__ == "__main__":
     if len(sys.argv) != 4:
-        sys.exit(__doc__)
+        sys.exit('usage: python3 tools/export_ai_log.py <transcript.jsonl> <data_dir> <out.md>')
     main(*sys.argv[1:4])

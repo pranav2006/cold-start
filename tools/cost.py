@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""Summarise usage.jsonl from the last run, and turn it into dollars per 1,000 messages.
-
-    python3 tools/cost.py <input_dir> [input_price_per_million] [output_price_per_million]
-
-Prices are the model's OpenRouter prices in dollars per million tokens (look them up on its page).
-Delete usage.jsonl before a run so it only holds that run.
-"""
 import json
 import sys
 from pathlib import Path
@@ -27,5 +20,5 @@ def main(folder, price_in=None, price_out=None):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit(__doc__)
+        sys.exit('usage: python3 tools/cost.py <input_dir> [input_price_per_million] [output_price_per_million]')
     main(*sys.argv[1:4])
