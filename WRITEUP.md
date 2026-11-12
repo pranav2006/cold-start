@@ -43,8 +43,8 @@ Every pass has a fallback (rules, no goals, "remind"), the client tolerates bad 
 renamed fields and bare lists, and one hard deadline at 26 minutes stops new requests. Without a model
 key the run still writes the rule-based parts in about a second.
 
-**Dev score** (checker, 56 points): 26.8 (circles 8.2, organisations 3.9, chats 7.2, loops found 3.9,
-loops closed 3.6). On the labelled example: 64 of 74, with goals 8/8 and help 10/10.
+**Dev score** (checker, 56 points): 26.9 (circles 8.2, organisations 3.9, chats 7.2, loops found 3.8,
+loops closed 3.8). On the labelled example: 64 of 74, with goals 8/8 and help 10/10.
 
 ## What it costs
 
