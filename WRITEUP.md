@@ -21,10 +21,12 @@ Rules first (free), then four small model passes, each checked by code.
    company's team, and from household groups. Every chat goes to an organisation or one person.
    Circles come from a ladder of signals: the seed, then kinship or staff words in contact names (how
    Arjun saved them), then shared surname and group membership. Links are only for people Arjun deals with
-   directly.
+   directly: a 1:1 chat, speaking in a small group of the organisation, or a tagged name of someone active
+   (on dev, no tagged name that almost never spoke was linked in the answer).
 2. **Circles, second opinion** (`people.py`). People the rules were unsure about get a ~600-character
    profile (saved names, shared groups, a sample of their 1:1 chat), about 12 per request. The model never
-   overrides Arjun's own signals (the seed, a kinship tag, the spouse rule).
+   overrides Arjun's own signals (the seed, a kinship tag, the spouse rule), and someone caught by his
+   surname or a family group can be moved only within family (relative -> sibling, not relative -> client).
 3. **Open loops** (`loops.py`). Each chat becomes compact lines (`M00391 14:57 Priya: ...`) with day
    headers. Long chats go in ~6,000-character parts in order, and each part is told which loops are still
    open, so a request on Monday can be closed by "paid" on Thursday. Small chats are packed together.
@@ -43,8 +45,9 @@ Every pass has a fallback (rules, no goals, "remind"), the client tolerates bad 
 renamed fields and bare lists, and one hard deadline at 26 minutes stops new requests. Without a model
 key the run still writes the rule-based parts in about a second.
 
-**Dev score** (checker, 56 points): 26.9 (circles 8.2, organisations 3.9, chats 7.2, loops found 3.8,
-loops closed 3.8). On the labelled example: 64 of 74, with goals 8/8 and help 10/10.
+**Dev score** (checker, 56 points): 27.9 (circles 8.5, organisations 4.1, chats 7.2, loops found 4.0,
+loops closed 4.2). On the labelled example: 64 of 74, with organisations, chats, goals and help all full
+marks; its loops parts move by a few points between runs (only 10 loops, mostly one request).
 
 ## What it costs
 
@@ -70,7 +73,7 @@ Rough rates are from dev, which the organisers say is "good, not perfect", so tr
   row get merged or skipped. Recall there is worse than in short chats.
 - **Status.** About 1 in 10 matched loops is wrongly "done" (it costs a point each); about a quarter
   of real "done" loops stay "open" because the closing message is indirect (a photo, "ok").
-- **Circles** about 65 to 70% right. Typical errors: parent or sibling read as "relative" when the
+- **Circles** about 70% right. Typical errors: parent or sibling read as "relative" when the
   surname is shared; colleagues with almost empty chats left as "friend"; client vs vendor for service
   businesses.
 - **Organisations.** Seed companies, team groups and Home are found; organisations visible only in message

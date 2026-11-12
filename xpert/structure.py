@@ -275,11 +275,28 @@ def guess_circles(d, orgs, chat_org, client_groups):
     return circles, why
 
 
-def deals_with(d, pid):
-    """People Arjun deals with himself: he has a 1:1 chat with them, told us about them, or saved
-    them with a tag. Someone who only sits in a big group is not linked to anything: linking every
-    member of a 20-person ops group would swamp the organisation with strangers."""
+SMALL_GROUP = 6  # participants, Arjun included
+
+
+def known_contact(d, pid):
+    """Arjun has a 1:1 chat with them, told us about them, or saved them with a tag."""
     return pid in d.dm_of or pid in (d.seed.get("circles") or {}) or len(name_words(d, pid)) > 2
+
+
+def deals_with(d, pid, chat_org):
+    """People Arjun deals with himself: he has a 1:1 chat with them, told us about them, they speak
+    in a small group of an organisation (a 4-person house-staff group), or he saved them with a tag
+    and they are active. Someone who only sits in a big group is not linked to anything: linking
+    every member of a 20-person ops group would swamp the organisation with strangers. A tagged
+    name that almost never speaks is the same: measured on dev, none of them were linked."""
+    if pid in d.dm_of or pid in (d.seed.get("circles") or {}):
+        return True
+    for cid in d.chats_of[pid]:
+        c = d.chats[cid]
+        if cid in chat_org and c["is_group"] and len(c["participants"]) <= SMALL_GROUP \
+                and any(m["sender_id"] == pid for m in d.by_chat.get(cid, [])):
+            return True
+    return len(name_words(d, pid)) > 2 and d.sent[pid] >= max(30, len(d.messages) / 150)
 
 
 def find_links(d, orgs, chat_org, circles):
@@ -289,7 +306,7 @@ def find_links(d, orgs, chat_org, circles):
     for cid, oid in chat_org.items():
         org_chats[oid].add(cid)
     for pid in d.people:
-        if not deals_with(d, pid):
+        if not deals_with(d, pid, chat_org):
             continue
         circle = circles.get(pid)
         if circle in ("colleague", "partner"):

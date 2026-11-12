@@ -16,11 +16,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import model
 from .data import ME, clean
-from .structure import CIRCLES, deals_with, last_name
+from .structure import CIRCLES, known_contact, last_name
 
 BATCH = int(os.environ.get("PEOPLE_BATCH", "12"))
 WORKERS = int(os.environ.get("LOOPS_WORKERS", "8"))
 STRONG_RULES = {"seed", "kinship word in contact name", "surname + busiest 1:1 chat"}
+# Family signals the model may sharpen (relative -> sibling) but not leave (relative -> client): on dev,
+# everyone the surname or family-group rule caught was family, and the model's one move out was wrong.
+FAMILY_RULES = {"shares Arjun's surname", "in a family group"}
+FAMILY = {"spouse", "parent", "in-law", "sibling", "child", "relative"}
 LINE_CHARS = 140
 
 SYSTEM = """You help sort the contacts of Arjun, an Indian founder, into circles. For each person you get the names his phone shows for them, the groups they share with him, a first guess from simple rules, and a sample of their messages.
@@ -79,7 +83,7 @@ def wanted(d, pid):
         return False
     small_active = d.sent[pid] >= 3 and any(
         d.chats[c]["is_group"] and len(d.chats[c]["participants"]) <= 8 for c in d.chats_of[pid])
-    return deals_with(d, pid) or small_active
+    return known_contact(d, pid) or small_active
 
 
 def refine_circles(d, circles, why, org_names):
@@ -99,6 +103,8 @@ def refine_circles(d, circles, why, org_names):
         for batch, reply in zip(batches, pool.map(ask, batches)):
             for item in model.items(reply, "people"):
                 pid, circle = item.get("id"), item.get("circle")
+                if why.get(pid) in FAMILY_RULES and circle not in FAMILY:
+                    continue
                 if pid in batch and circle in CIRCLES and circle != circles[pid]:
                     why[pid] = f"model (rules said {circles[pid]}: {why[pid]})"
                     circles[pid] = circle
